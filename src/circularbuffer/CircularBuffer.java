@@ -6,12 +6,23 @@
 
 package circularbuffer;
 
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
 
 /**
  *
  * @author hfs5022
  */
 public class CircularBuffer implements  Buffer {
+    
+    // Our lock.
+    private final Lock accessLock = new ReentrantLock();
+    
+    // Our conditions.
+    private final Condition canWrite = accessLock.newCondition();
+    private final Condition canRead = accessLock.newCondition();
 
     private final int[] buffer = {-1,-1,-1};
     
@@ -20,37 +31,61 @@ public class CircularBuffer implements  Buffer {
     private int readIndex = 0;
 
     @Override
-    public synchronized void set(int value) throws InterruptedException {
-        while (occupiedCells == buffer.length) {
-            System.out.println("Buffer is full; producer waiting.");
-            wait();
+    public void set(int value) throws InterruptedException {
+        
+        accessLock.lock();
+        
+        try{
+        
+            while (occupiedCells == buffer.length) {
+                System.out.println("Buffer is full; producer waiting.");
+                //wait();
+                canWrite.await();
+            }
+
+            buffer[writeIndex] = value;
+
+            writeIndex = (writeIndex + 1) % buffer.length;
+
+            ++occupiedCells;
+            displayState("Producer writes " + value);
+            //notifyAll();
+            canRead.signalAll();
+            
+        } finally {
+            accessLock.unlock();
         }
-        
-        buffer[writeIndex] = value;
-        
-        writeIndex = (writeIndex + 1) % buffer.length;
-        
-        ++occupiedCells;
-        displayState("Producer writes " + value);
-        notifyAll();
     }
 
     @Override
-    public synchronized int get() throws InterruptedException {
-        while (occupiedCells == 0) {
-            System.out.println("Buffer is empty; consumer waiting.");
-            wait();
+    public int get() throws InterruptedException {
+        
+        int readValue = -1;
+        
+        accessLock.lock();
+        
+        try {
+            
+            while (occupiedCells == 0) {
+                System.out.println("Buffer is empty; consumer waiting.");
+                //wait();
+                canRead.await();
+            }
+
+            readValue = buffer[readIndex];
+
+            readIndex = (readIndex + 1) % buffer.length;
+
+            --occupiedCells;
+            displayState("Consumer reads " + readValue);
+            //notifyAll();
+            canWrite.signalAll();
+        
+        } finally {
+            accessLock.unlock();
+            return readValue;
         }
         
-        int readValue = buffer[readIndex];
-        
-        readIndex = (readIndex + 1) % buffer.length;
-        
-        --occupiedCells;
-        displayState("Consumer reads " + readValue);
-        notifyAll();
-        
-        return readValue;
     }
     
     public void displayState(String operation) {
